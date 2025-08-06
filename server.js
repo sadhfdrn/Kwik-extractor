@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 const querystring = require('querystring');
+const zlib = require('zlib');
 
 const PORT = 5000;
 
@@ -93,6 +94,9 @@ async function extractKwikLink(url) {
         // Step 1: Fetch initial page
         const initialResponse = await fetchWithHeaders(url);
         let cleanText = initialResponse.body.replace(/(\r\n|\r|\n)/g, '');
+        cleanText = sanitizeUtf8(cleanText);
+        
+        console.log('Debug: Initial page fetched, content length:', cleanText.length);
         
         let kwikLink = '';
         
@@ -101,11 +105,39 @@ async function extractKwikLink(url) {
         if (directLinkMatch) {
             kwikLink = directLinkMatch[1];
         } else {
-            // Decode obfuscated content
-            const encodeMatch = cleanText.match(/\(\s*"([^",]*)"\s*,\s*\d+\s*,\s*"([^",]*)"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+[a-zA-Z]?\s*\)/);
+            // Try multiple regex patterns for obfuscated content
+            let encodeMatch = null;
+            
+            // Pattern 1: Standard pattern from C++
+            encodeMatch = cleanText.match(/\(\s*"([^",]*)"\s*,\s*\d+\s*,\s*"([^",]*)"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+[a-zA-Z]?\s*\)/);
+            
+            // Pattern 2: Alternative format without spaces
+            if (!encodeMatch) {
+                encodeMatch = cleanText.match(/\("([^",]*)",\d+,"([^",]*)",(\d+),(\d+),\d+[a-zA-Z]?\)/);
+            }
+            
+            // Pattern 3: Alternative format with different delimiters
+            if (!encodeMatch) {
+                encodeMatch = cleanText.match(/\(['"]([^'",]*)['"]\s*,\s*\d+\s*,\s*['"]([^'",]*)['"]\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+[a-zA-Z]?\s*\)/);
+            }
+            
+            // Pattern 4: Look for any function call with the pattern
+            if (!encodeMatch) {
+                encodeMatch = cleanText.match(/[a-zA-Z_$][a-zA-Z0-9_$]*\s*\(\s*['"]([^'",]*)['"],\d+,['"]([^'",]*)['"]\s*,\s*(\d+)\s*,\s*(\d+)/);
+            }
             
             if (!encodeMatch) {
-                throw new Error('Could not find encoding parameters in the page');
+                console.log('Debug: Clean text length:', cleanText.length);
+                console.log('Debug: First 1000 chars:', cleanText.substring(0, 1000));
+                console.log('Debug: Looking for patterns in text...');
+                
+                // Look for any parentheses with string patterns
+                const patternSearch = cleanText.match(/\([^)]*["'][^"']*["'][^)]*\)/g);
+                if (patternSearch) {
+                    console.log('Debug: Found potential patterns:', patternSearch.slice(0, 5));
+                }
+                
+                throw new Error('Could not find encoding parameters in the page. Debug info logged.');
             }
             
             const [, encodedString, alphabetKey, offsetStr, baseStr] = encodeMatch;
@@ -124,17 +156,37 @@ async function extractKwikLink(url) {
         }
         
         // Step 2: Fetch Kwik page and extract direct link
+        console.log('Debug: Fetching Kwik page:', kwikLink);
         const kwikResponse = await fetchWithHeaders(kwikLink);
         const kwikText = kwikResponse.body.replace(/(\r\n|\r|\n)/g, '');
         
+        console.log('Debug: Kwik page fetched, content length:', kwikText.length);
+        
         // Extract session cookie
         const kwikSession = extractCookieValue(kwikResponse.headers['set-cookie'], 'kwik_session');
+        console.log('Debug: Kwik session extracted:', kwikSession ? 'found' : 'not found');
         
-        // Find encoded parameters in Kwik page
-        const kwikEncodeMatch = kwikText.match(/\(\s*"([^",]*)"\s*,\s*\d+\s*,\s*"([^",]*)"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+[a-zA-Z]?\s*\)/);
+        // Find encoded parameters in Kwik page with multiple patterns
+        let kwikEncodeMatch = null;
+        
+        // Try the same patterns as above
+        kwikEncodeMatch = kwikText.match(/\(\s*"([^",]*)"\s*,\s*\d+\s*,\s*"([^",]*)"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+[a-zA-Z]?\s*\)/);
         
         if (!kwikEncodeMatch) {
-            return { success: true, directLink: kwikLink, message: 'Kwik link extracted (direct link extraction not available)' };
+            kwikEncodeMatch = kwikText.match(/\("([^",]*)",\d+,"([^",]*)",(\d+),(\d+),\d+[a-zA-Z]?\)/);
+        }
+        
+        if (!kwikEncodeMatch) {
+            kwikEncodeMatch = kwikText.match(/\(['"]([^'",]*)['"]\s*,\s*\d+\s*,\s*['"]([^'",]*)['"]\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+[a-zA-Z]?\s*\)/);
+        }
+        
+        if (!kwikEncodeMatch) {
+            kwikEncodeMatch = kwikText.match(/[a-zA-Z_$][a-zA-Z0-9_$]*\s*\(\s*['"]([^'",]*)['"],\d+,['"]([^'",]*)['"]\s*,\s*(\d+)\s*,\s*(\d+)/);
+        }
+        
+        if (!kwikEncodeMatch) {
+            console.log('Debug: Kwik page encoding not found, returning intermediate result');
+            return { success: true, directLink: kwikLink, message: 'Kwik link extracted (direct link pattern not found in page)' };
         }
         
         const [, kwikEncodedString, kwikAlphabetKey, kwikOffsetStr, kwikBaseStr] = kwikEncodeMatch;
@@ -207,7 +259,7 @@ function decodeJSStyle(encodedStr, alphabetKey, offset, base) {
     return result;
 }
 
-// Make HTTP/HTTPS request with proper headers
+// Make HTTP/HTTPS request with proper headers and compression support
 function fetchWithHeaders(url, options = {}) {
     return new Promise((resolve, reject) => {
         const urlObj = new URL(url);
@@ -223,7 +275,7 @@ function fetchWithHeaders(url, options = {}) {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
+                'Accept-Encoding': 'gzip, deflate, br',
                 'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1',
                 ...options.headers
@@ -231,15 +283,36 @@ function fetchWithHeaders(url, options = {}) {
         };
         
         const req = lib.request(reqOptions, (res) => {
-            let data = '';
+            const chunks = [];
             
             res.on('data', (chunk) => {
-                data += chunk;
+                chunks.push(chunk);
             });
             
             res.on('end', () => {
+                let buffer = Buffer.concat(chunks);
+                let body = '';
+                
+                // Handle different compression types
+                const encoding = res.headers['content-encoding'];
+                
+                try {
+                    if (encoding === 'gzip') {
+                        body = zlib.gunzipSync(buffer).toString('utf8');
+                    } else if (encoding === 'deflate') {
+                        body = zlib.inflateSync(buffer).toString('utf8');
+                    } else if (encoding === 'br') {
+                        body = zlib.brotliDecompressSync(buffer).toString('utf8');
+                    } else {
+                        body = buffer.toString('utf8');
+                    }
+                } catch (decompressError) {
+                    console.log('Debug: Decompression failed, trying as plain text');
+                    body = buffer.toString('utf8');
+                }
+                
                 resolve({
-                    body: data,
+                    body: body,
                     headers: res.headers,
                     statusCode: res.statusCode
                 });
@@ -306,6 +379,12 @@ function extractCookieValue(setCookieHeaders, cookieName) {
     }
     
     return '';
+}
+
+// Sanitize UTF-8 content (JavaScript version of C++ function)
+function sanitizeUtf8(input) {
+    // Remove non-printable ASCII characters except whitespace
+    return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
 const server = http.createServer((req, res) => {
