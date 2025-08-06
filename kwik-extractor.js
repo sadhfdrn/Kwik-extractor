@@ -68,22 +68,60 @@ class KwikExtractor {
     }
 
     /**
-     * Create CORS proxy URL for making requests
+     * Use backend API for requests
      */
-    createProxyUrl(url) {
-        // Use a CORS proxy service
-        return `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    createApiUrl(endpoint, url = '') {
+        if (endpoint === 'extract') {
+            return '/api/extract';
+        } else if (endpoint === 'fetch') {
+            return `/api/fetch/${encodeURIComponent(url)}`;
+        }
+        return endpoint;
     }
 
     /**
-     * Extract Kwik link from the initial page
+     * Extract direct download link using backend API
+     */
+    async extractWithBackend(url, onProgress) {
+        try {
+            onProgress?.('Starting extraction...', 10);
+            
+            const response = await fetch(this.createApiUrl('extract'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ url })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: Server error`);
+            }
+            
+            onProgress?.('Processing response...', 90);
+            const data = await response.json();
+            
+            if (!data.success) {
+                throw new Error(data.error || 'Unknown server error');
+            }
+            
+            onProgress?.('Extraction completed!', 100);
+            return data;
+            
+        } catch (error) {
+            throw new Error(`Backend extraction failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Fallback method for frontend-only extraction (legacy)
      */
     async extractKwikLink(link, onProgress) {
         try {
             onProgress?.('Fetching initial page...', 20);
             
-            const proxyUrl = this.createProxyUrl(link);
-            const response = await fetch(proxyUrl);
+            const fetchUrl = this.createApiUrl('fetch', link);
+            const response = await fetch(fetchUrl);
             
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: Failed to fetch page`);
@@ -131,84 +169,6 @@ class KwikExtractor {
 
         } catch (error) {
             throw new Error(`Failed to extract Kwik link: ${error.message}`);
-        }
-    }
-
-    /**
-     * Fetch direct download link from Kwik page
-     */
-    async fetchDirectLink(kwikLink, onProgress, retries = 3) {
-        if (retries <= 0) {
-            throw new Error('Exceeded retry limit');
-        }
-
-        try {
-            onProgress?.('Fetching Kwik page...', 85);
-
-            const proxyUrl = this.createProxyUrl(kwikLink);
-            const response = await fetch(proxyUrl);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: Failed to fetch Kwik page`);
-            }
-
-            const data = await response.json();
-            let cleanText = data.contents.replace(/(\r\n|\r|\n)/g, '');
-
-            onProgress?.('Extracting download parameters...', 90);
-
-            // Extract encoded parameters
-            const encodeMatch = cleanText.match(/\(\s*"([^",]*)"\s*,\s*\d+\s*,\s*"([^",]*)"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+[a-zA-Z]?\s*\)/);
-            
-            if (!encodeMatch) {
-                if (retries > 1) {
-                    onProgress?.('Retrying extraction...', 85);
-                    return this.fetchDirectLink(kwikLink, onProgress, retries - 1);
-                }
-                throw new Error('Could not find encoding parameters');
-            }
-
-            const [, encodedString, alphabetKey, offsetStr, baseStr] = encodeMatch;
-            const offset = parseInt(offsetStr);
-            const base = parseInt(baseStr);
-
-            // Decode the string
-            const decodedString = this.decodeJSStyle(encodedString, this.zp, alphabetKey, offset, base, this.placeholder);
-
-            // Extract link and token from decoded content
-            const linkMatch = decodedString.match(/"(https?:\/\/kwik\.[^\/\s"]+\/[^\/\s"]+\/[^"\s]*)"/);
-            const tokenMatch = decodedString.match(/name="_token"[^"]*"(\S*)"/);
-
-            if (!linkMatch || !tokenMatch) {
-                if (retries > 1) {
-                    onProgress?.('Retrying extraction...', 85);
-                    return this.fetchDirectLink(kwikLink, onProgress, retries - 1);
-                }
-                throw new Error('Could not extract required parameters from decoded content');
-            }
-
-            onProgress?.('Getting final download link...', 95);
-
-            const postUrl = linkMatch[1];
-            const token = tokenMatch[1];
-
-            // Make POST request to get the direct link
-            // Note: This part would need a backend service in a real implementation
-            // since browsers can't easily handle this type of authenticated request with proper headers
-            
-            // For demonstration, we'll return the constructed URL
-            // In a real implementation, you'd need a backend service to handle this
-            const directLink = await this.makeAuthenticatedRequest(postUrl, token, kwikLink);
-            
-            onProgress?.('Direct link extracted successfully!', 100);
-            return directLink;
-
-        } catch (error) {
-            if (retries > 1) {
-                onProgress?.('Retrying...', 85);
-                return this.fetchDirectLink(kwikLink, onProgress, retries - 1);
-            }
-            throw new Error(`Failed to fetch direct link: ${error.message}`);
         }
     }
 
@@ -262,27 +222,26 @@ class KwikExtractor {
                 throw new Error('Invalid Kwik URL format');
             }
 
-            // Extract Kwik link from the initial page
-            const kwikLink = await this.extractKwikLink(url, onProgress);
-            
-            // Try to get direct download link
+            // Try backend extraction first (most reliable)
             try {
-                const directLink = await this.fetchDirectLink(kwikLink, onProgress);
-                return {
-                    success: true,
-                    directLink,
-                    kwikLink,
-                    message: 'Direct download link extracted successfully!'
-                };
-            } catch (error) {
-                // If direct link extraction fails, still return the Kwik link
-                return {
-                    success: true,
-                    directLink: kwikLink,
-                    kwikLink,
-                    message: 'Kwik link extracted successfully. Direct link extraction requires additional backend support.',
-                    warning: error.message
-                };
+                const result = await this.extractWithBackend(url, onProgress);
+                return result;
+            } catch (backendError) {
+                onProgress?.('Backend extraction failed, trying fallback...', 50);
+                
+                // Fallback to frontend-only extraction
+                try {
+                    const kwikLink = await this.extractKwikLink(url, onProgress);
+                    return {
+                        success: true,
+                        directLink: kwikLink,
+                        kwikLink,
+                        message: 'Kwik link extracted successfully. Full extraction may require additional backend support.',
+                        warning: `Backend error: ${backendError.message}`
+                    };
+                } catch (fallbackError) {
+                    throw new Error(`Both backend and fallback extraction failed. Backend: ${backendError.message}. Fallback: ${fallbackError.message}`);
+                }
             }
 
         } catch (error) {
