@@ -19,6 +19,10 @@ args = "JavaScript Console App"
 task = "workflow.run"
 args = "main"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Kwik Link Extractor"
+
 [[workflows.workflow]]
 name = "JavaScript Console App"
 author = "agent"
@@ -34,3 +38,16 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "node hello.js"
+
+[[workflows.workflow]]
+name = "Kwik Link Extractor"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "node server.js"
+waitForPort = 5000
+
+[[ports]]
+localPort = 5000
+externalPort = 80

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kwik Link Extractor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔗 Kwik Link Extractor</h1>
+            <p>Extract direct download links from Kwik URLs</p>
+        </div>
+
+        <div class="input-section">
+            <div class="input-group">
+                <label for="kwikUrl">Enter Kwik URL:</label>
+                <input 
+                    type="url" 
+                    id="kwikUrl" 
+                    placeholder="https://kwik.si/f/b2bq1bjLdsC2"
+                    class="url-input"
+                >
+                <button id="extractBtn" class="extract-btn">
+                    <span class="btn-text">Extract Link</span>
+                    <div class="spinner hidden"></div>
+                </button>
+            </div>
+        </div>
+
+        <div class="status-section">
+            <div id="statusContainer" class="status-container hidden">
+                <div class="status-item">
+                    <span class="status-icon">🔍</span>
+                    <span id="statusText">Ready to extract...</span>
+                </div>
+                <div class="progress-bar">
+                    <div id="progressFill" class="progress-fill"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="result-section">
+            <div id="resultContainer" class="result-container hidden">
+                <h3>📥 Direct Download Link:</h3>
+                <div class="result-link-container">
+                    <input 
+                        type="text" 
+                        id="resultLink" 
+                        readonly 
+                        class="result-link"
+                    >
+                    <button id="copyBtn" class="copy-btn" title="Copy to clipboard">
+                        📋
+                    </button>
+                    <a id="downloadBtn" class="download-btn" target="_blank" title="Open in new tab">
+                        ⬇️
+                    </a>
+                </div>
+                <div class="result-info">
+                    <small id="resultInfo"></small>
+                </div>
+            </div>
+        </div>
+
+        <div class="error-section">
+            <div id="errorContainer" class="error-container hidden">
+                <div class="error-content">
+                    <span class="error-icon">❌</span>
+                    <span id="errorText"></span>
+                </div>
+                <button id="retryBtn" class="retry-btn">Try Again</button>
+            </div>
+        </div>
+
+        <div class="info-section">
+            <details>
+                <summary>ℹ️ How it works</summary>
+                <div class="info-content">
+                    <p>This tool extracts direct download links from Kwik URLs by:</p>
+                    <ol>
+                        <li>Fetching the Kwik page content</li>
+                        <li>Extracting encoded parameters from the JavaScript</li>
+                        <li>Decoding the obfuscated content using the provided algorithm</li>
+                        <li>Making authenticated requests to get the final download link</li>
+                    </ol>
+                    <p><strong>Supported formats:</strong> kwik.si, kwik.cx, kwik.sx, and other Kwik domains</p>
+                </div>
+            </details>
+        </div>
+    </div>
+
+    <script src="kwik-extractor.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
