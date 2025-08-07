@@ -6,6 +6,95 @@ const { URL } = require('url');
 const querystring = require('querystring');
 const zlib = require('zlib');
 
+// Proxy configuration and testing
+let proxyConfig = null;
+let proxyAvailable = false;
+
+function parseProxyConfig() {
+    const proxyString = process.env.PROXY;
+    if (!proxyString) return null;
+    
+    const parts = proxyString.trim().split(':');
+    if (parts.length === 4) {
+        return {
+            host: parts[0].trim(),
+            port: parseInt(parts[1].trim()),
+            username: parts[2].trim(),
+            password: parts[3].trim()
+        };
+    }
+    return null;
+}
+
+async function testProxy(proxy) {
+    return new Promise((resolve) => {
+        // Test with a simple HTTP request through the proxy
+        const testUrl = 'http://httpbin.org/ip';
+        const options = {
+            hostname: proxy.host,
+            port: proxy.port,
+            path: testUrl,
+            method: 'GET',
+            headers: {
+                'Proxy-Authorization': `Basic ${Buffer.from(`${proxy.username}:${proxy.password}`).toString('base64')}`,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Host': 'httpbin.org'
+            },
+            timeout: 10000
+        };
+
+        const req = http.request(options, (res) => {
+            const chunks = [];
+            res.on('data', chunk => chunks.push(chunk));
+            res.on('end', () => {
+                try {
+                    const data = Buffer.concat(chunks).toString();
+                    if (res.statusCode === 200) {
+                        console.log('✓ Proxy test successful - response received');
+                        resolve(true);
+                    } else {
+                        console.log(`✗ Proxy test failed with status: ${res.statusCode}`);
+                        resolve(false);
+                    }
+                } catch (e) {
+                    console.log('✗ Proxy test failed - invalid response');
+                    resolve(false);
+                }
+            });
+        });
+
+        req.on('error', (error) => {
+            console.log(`✗ Proxy test error: ${error.message}`);
+            resolve(false);
+        });
+
+        req.on('timeout', () => {
+            console.log('✗ Proxy test timeout after 10 seconds');
+            req.destroy();
+            resolve(false);
+        });
+
+        req.setTimeout(10000);
+        req.end();
+    });
+}
+
+// Initialize proxy on startup
+(async function initializeProxy() {
+    proxyConfig = parseProxyConfig();
+    if (proxyConfig) {
+        console.log(`Testing proxy: ${proxyConfig.host}:${proxyConfig.port}`);
+        proxyAvailable = await testProxy(proxyConfig);
+        if (proxyAvailable) {
+            console.log('✓ Proxy is available and will be used for requests');
+        } else {
+            console.log('✗ Proxy test failed, will use direct connections');
+        }
+    } else {
+        console.log('No proxy configured, using direct connections');
+    }
+})();
+
 const PORT = 5000;
 
 // MIME types for different file extensions
@@ -264,23 +353,52 @@ function fetchWithHeaders(url, options = {}) {
     return new Promise((resolve, reject) => {
         const urlObj = new URL(url);
         const isHttps = urlObj.protocol === 'https:';
-        const lib = isHttps ? https : http;
+        const useProxy = proxyAvailable && proxyConfig && !isHttps; // Only use proxy for HTTP requests
         
-        const reqOptions = {
-            hostname: urlObj.hostname,
-            port: urlObj.port || (isHttps ? 443 : 80),
-            path: urlObj.pathname + urlObj.search,
-            method: options.method || 'GET',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-                ...options.headers
+        let reqOptions;
+        let lib = http;
+
+        if (useProxy) {
+            // Use proxy for HTTP requests
+            reqOptions = {
+                hostname: proxyConfig.host,
+                port: proxyConfig.port,
+                path: url, // Full URL as path when using proxy
+                method: options.method || 'GET',
+                headers: {
+                    'Proxy-Authorization': `Basic ${Buffer.from(`${proxyConfig.username}:${proxyConfig.password}`).toString('base64')}`,
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    ...options.headers
+                }
+            };
+            console.log(`Using proxy for: ${url}`);
+        } else {
+            // Direct connection
+            lib = isHttps ? https : http;
+            reqOptions = {
+                hostname: urlObj.hostname,
+                port: urlObj.port || (isHttps ? 443 : 80),
+                path: urlObj.pathname + urlObj.search,
+                method: options.method || 'GET',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    ...options.headers
+                }
+            };
+            if (useProxy !== undefined) {
+                console.log(`Direct connection for: ${url}`);
             }
-        };
+        }
         
         const req = lib.request(reqOptions, (res) => {
             const chunks = [];

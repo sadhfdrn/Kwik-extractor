@@ -53,6 +53,8 @@ Preferred communication style: Simple, everyday language.
 - **Compression Support**: Handles gzip, deflate, and brotli compression automatically
 - **Session Management**: Proper cookie handling for authenticated requests
 - **Multiple Regex Patterns**: Flexible pattern matching for different JavaScript obfuscation formats
+- **Intelligent Proxy Support**: Automatic proxy testing with fallback to direct connections
+- **Smart Connection Routing**: HTTPS uses direct, HTTP uses proxy when available
 - **Real-time Progress**: Live progress indicators during extraction process
 - **Async/Await**: Modern JavaScript for handling asynchronous operations
 - **DOM Manipulation**: Dynamic UI updates without external frameworks
@@ -63,4 +65,6 @@ Preferred communication style: Simple, everyday language.
 - **Enhanced debugging**: Detailed logging for troubleshooting extraction issues
 - **Working extraction**: Successfully extracts direct download links from real Kwik URLs
 - **Backend API**: Complete extraction process handled server-side with proper session management
+- **Proxy support**: Added intelligent proxy support with automatic testing and fallback to direct connections
+- **Smart routing**: HTTPS requests use direct connections, HTTP requests use proxy when available
 - **Cleanup**: Removed animepahe-cli C++ reference code after successful JavaScript implementation
