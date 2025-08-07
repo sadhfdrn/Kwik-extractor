@@ -353,13 +353,13 @@ function fetchWithHeaders(url, options = {}) {
     return new Promise((resolve, reject) => {
         const urlObj = new URL(url);
         const isHttps = urlObj.protocol === 'https:';
-        const useProxy = proxyAvailable && proxyConfig && !isHttps; // Only use proxy for HTTP requests
+        const useProxy = proxyAvailable && proxyConfig; // Use proxy for both HTTP and HTTPS when available
         
         let reqOptions;
         let lib = http;
 
         if (useProxy) {
-            // Use proxy for HTTP requests
+            // Use proxy for both HTTP and HTTPS requests
             reqOptions = {
                 hostname: proxyConfig.host,
                 port: proxyConfig.port,
@@ -376,7 +376,7 @@ function fetchWithHeaders(url, options = {}) {
                     ...options.headers
                 }
             };
-            console.log(`Using proxy for: ${url}`);
+            console.log(`🔗 Using proxy for: ${url}`);
         } else {
             // Direct connection
             lib = isHttps ? https : http;
@@ -395,9 +395,7 @@ function fetchWithHeaders(url, options = {}) {
                     ...options.headers
                 }
             };
-            if (useProxy !== undefined) {
-                console.log(`Direct connection for: ${url}`);
-            }
+            console.log(`🌐 Direct connection for: ${url}`);
         }
         
         const req = lib.request(reqOptions, (res) => {
